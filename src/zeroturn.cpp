@@ -45,6 +45,8 @@ class Navigator : public rclcpp::Node {
         using GoalHandle = rclcpp_action::ServerGoalHandle<TheAction>;
         std::shared_ptr<GoalHandle> handeler_;
         rclcpp_action::Server<TheAction>::SharedPtr action_server_;
+
+        double previous_heading_error_;
         
     public:
         Navigator(): Node("controller",
@@ -52,40 +54,26 @@ class Navigator : public rclcpp::Node {
             .allow_undeclared_parameters(true)
             .automatically_declare_parameters_from_overrides(true)
         ) {
-            try {
-                name = this->get_parameter("name").as_string(); 
-                topic_prefix_param = this->get_parameter("topic_prefix").as_string();
-            } catch (...) {
-                name = "path_server";
-                topic_prefix_param = "/fb";
-            }
+            name = this->get_parameter_or<std::string>("name", "path_server");
+            topic_prefix_param = this->get_parameter_or<std::string>("topic_prefix", "/fb");
+            max_linear_speed = this->get_parameter_or<float>("max_linear_speed", 0.5);
+            max_angular_speed = this->get_parameter_or<float>("max_angular_speed", 0.5);
 
-            try {
-                max_linear_speed = this->get_parameter("max_linear_speed").as_double();
-                max_angular_speed = this->get_parameter("max_angular_speed").as_double();
-            } catch (...) {
-                RCLCPP_WARN(this->get_logger(), "Parameters max_linear_speed and max_angular_speed not found, using default");
-                max_linear_speed = 0.5;
-                max_angular_speed = 0.5;
-            }
-            RCLCPP_INFO(this->get_logger(), "Max linear speed: %f, Max angular speed: %f", max_linear_speed, max_angular_speed);
-
-
-            this->action_server_ = rclcpp_action::create_server<TheAction>(this, topic_prefix_param + "/nav/control",
+            this->action_server_ = rclcpp_action::create_server<TheAction>(this, topic_prefix_param + "/con/zeroturn",
                 std::bind(&Navigator::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
                 std::bind(&Navigator::handle_cancel, this, std::placeholders::_1),
                 std::bind(&Navigator::handle_accepted, this, std::placeholders::_1)
             );
+
+            previous_heading_error_ = 0.0;
             
             //subscribers
-            odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(topic_prefix_param +"/loc/odom", 10, std::bind(&Navigator::odom_callback, this, std::placeholders::_1));
+            odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(topic_prefix_param +"/loc/odom", 10, [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+                current_pose_ = msg->pose.pose;
+            });
         }
     
     private:
-        void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr& odom) {
-            current_pose_ = odom->pose.pose;
-        }
-
         rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const TheAction::Goal> goal){
             goal->segment;
             RCLCPP_INFO(this->get_logger(), "Received goal request");
@@ -122,35 +110,37 @@ class Navigator : public rclcpp::Node {
                 return;
             }
 
-            target_pose_ = goal->segment.destination.pose.position;
+            std::vector<geometry_msgs::msg::Point> segments = generateSegments(current_pose_.position, goal->segment.destination.pose.position);
+            for (const geometry_msgs::msg::Point& element : segments) {
+                target_pose_ = element;
+                RCLCPP_INFO(this->get_logger(), "Going to: %f, %f, currently at: %f, %f", target_pose_.x, target_pose_.y, current_pose_.position.x, current_pose_.position.y);
+                rclcpp::Rate loop_rate(10);
+                const double goal_threshold = 0.2;
+                while (rclcpp::ok()){
+                    if (goal_handle->is_canceling()) {
+                        fill_result(result, 1);
+                        goal_handle->canceled(result);
+                        return;
+                    } else if (!goal_handle->is_active()){
+                        fill_result(result, 1);
+                        return;
+                    }
+                    std::array<double, 3> nav_params = get_nav_params(max_angular_speed, max_linear_speed);
+                    fill_feedback(feedback, nav_params[0], nav_params[1], nav_params[2]);
 
-            RCLCPP_INFO(this->get_logger(), "Going to: %f, %f, currently at: %f, %f", target_pose_.x, target_pose_.y, current_pose_.position.x, current_pose_.position.y);
-            rclcpp::Rate loop_rate(10);
-            const double goal_threshold = 0.2;
-            while (rclcpp::ok()){
-                if (goal_handle->is_canceling()) {
-                    fill_result(result, 1);
-                    goal_handle->canceled(result);
-                    return;
-                } else if (!goal_handle->is_active()){
-                    fill_result(result, 1);
-                    return;
+                    // Check if within the goal threshold
+                    if (std::hypot(current_pose_.position.x - target_pose_.x, current_pose_.position.y - target_pose_.y) < goal_threshold) {
+                        break;
+                    }
+                    
+                    RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f", 
+                        current_pose_.position.x, current_pose_.position.y, 
+                        target_pose_.x, target_pose_.y, 
+                        nav_params[2]
+                    );
+                    goal_handle->publish_feedback(feedback);
+                    loop_rate.sleep();
                 }
-                std::array<double, 3> nav_params = get_nav_params(max_angular_speed, max_linear_speed);
-                fill_feedback(feedback, nav_params[0], nav_params[1], nav_params[2]);
-
-                // Check if within the goal threshold
-                if (nav_params[2] < goal_threshold) {
-                    break;
-                }
-                
-                RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f", 
-                    current_pose_.position.x, current_pose_.position.y, 
-                    target_pose_.x, target_pose_.y, 
-                    nav_params[2]
-                );
-                goal_handle->publish_feedback(feedback);
-                loop_rate.sleep();
             }
             // Goal is done, send success message
             if (rclcpp::ok()) {
@@ -174,7 +164,7 @@ class Navigator : public rclcpp::Node {
             result->return_code = return_code_msg;
         }
 
-        std::array<double, 3> get_nav_params(double angle_max = 3.14,  double velocity_max = 1.0,  double velocity_scale = 0.2, bool zeroturn = true) {
+        std::array<double, 3> get_nav_params(double angle_max = 3.14, double velocity_max = 1.0, double velocity_scale = 0.2, bool zeroturn = true, double heading_gain = 1.5, double derivative_gain = 0.1) {
             // Calculate the difference in positions
             double dx = target_pose_.x - current_pose_.position.x;
             double dy = target_pose_.y - current_pose_.position.y;
@@ -184,7 +174,7 @@ class Navigator : public rclcpp::Node {
             if (distance < epsilon) {
                 return {0.0, 0.0, distance};
             }
-            // Calculate the desired velocity (only for forward motion)
+            // Calculate the desired velocity (for forward motion)
             double velocity = velocity_scale * distance;
             // Calculate the desired heading
             double preheading = std::atan2(dy, dx);
@@ -200,19 +190,47 @@ class Navigator : public rclcpp::Node {
             // Log the desired and current headings
             RCLCPP_INFO(this->get_logger(), "Desired Heading: %f, Current Heading: %f", rad2deg(preheading), rad2deg(orientation));
             // Calculate the heading difference and normalize it
-            double heading = std::atan2(std::sin(preheading - orientation), std::cos(preheading - orientation));
+            double heading_error = std::atan2(std::sin(preheading - orientation), std::cos(preheading - orientation));
+            // Calculate the derivative (rate of change) of heading error
+            double heading_derivative = heading_error - previous_heading_error_;
+            previous_heading_error_ = heading_error;  // Update for next call
+            // PD Control for angular velocity
+            double angular_velocity = (heading_gain * heading_error) + (derivative_gain * heading_derivative);
             // Handle "zeroturn" behavior
             if (zeroturn) {
-                const double turn_threshold = 0.05;  // Threshold angle in radians
-                if (std::abs(heading) > turn_threshold) {
+                const double turn_threshold = 0.02;  // Reduced threshold for more aggressive turning
+                if (std::abs(heading_error) > turn_threshold) {
                     // If the heading difference is significant, turn in place and avoid moving forward
-                    return {0.0, std::clamp(heading, -angle_max, angle_max), distance};
+                    return {0.0, std::clamp(angular_velocity, -angle_max, angle_max), distance};
                 }
             }
             // Clamp the angular velocity and linear velocity
-            double angular = heading;
-            velocity = std::clamp(velocity, -velocity_max, velocity_max);
-            return {velocity, angular, distance};
+            angular_velocity = std::clamp(angular_velocity, -angle_max, angle_max);
+            velocity = std::clamp(velocity, -velocity_max, velocity_max);  // Final clamping 
+            return {velocity, angular_velocity, distance};
+        }
+
+
+
+
+        std::vector<geometry_msgs::msg::Point> generateSegments(const geometry_msgs::msg::Point &start, const geometry_msgs::msg::Point &end, int n=1) {
+            std::vector<geometry_msgs::msg::Point> segments;
+            if (n <= 1) {
+                segments.push_back(end);
+                return segments;
+            }
+            // Calculate the step size for each segment in both x and y directions
+            double stepX = (end.x - start.x) / n;
+            double stepY = (end.y - start.y) / n;
+            double stepZ = (end.z - start.z) / n;  // In case you want 3D points
+            // Generate each segment
+            for (int i = 1; i < n; ++i) {
+                geometry_msgs::msg::Point pt;
+                pt.x = start.x + i * stepX;
+                pt.y = start.y + i * stepY;
+                pt.z = start.z + i * stepZ;
+            }
+            return segments;
         }
 
 };
