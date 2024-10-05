@@ -20,6 +20,8 @@ cmake_policy(SET CMP0074 NEW)
 
 set(executables
   zeroturn
+  # purepursuit
+  # predictmod
 )
 
 
