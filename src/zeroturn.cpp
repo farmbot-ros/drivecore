@@ -7,10 +7,7 @@
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "nav_msgs/msg/odometry.hpp"
-#include "message_filters/subscriber.h"
-#include "message_filters/synchronizer.h"
-#include "message_filters/sync_policies/approximate_time.h"
-
+#include "std_msgs/msg/int8.hpp"
 #include "farmbot_interfaces/action/control.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -122,17 +119,15 @@ class Navigator : public rclcpp::Node {
             rclcpp::Rate loop_rate(10);
             while (rclcpp::ok()){
                 if (goal_handle->is_canceling()) {
-                    result->success = std_msgs::msg::Bool();
+                    fill_result(result, 1);
                     goal_handle->canceled(result);
                     return;
                 } else if (!goal_handle->is_active()){
-                    result->success = std_msgs::msg::Bool();
+                    fill_result(result, 1);
                     return;
                 }
                 std::array<double, 3> nav_params = get_nav_params(max_angular_speed, max_linear_speed);
-                geometry_msgs::msg::Twist twist;
-                twist.linear.x = nav_params[0];
-                twist.angular.z = nav_params[1];
+                fill_feedback(feedback, nav_params[0], nav_params[1]);
                 // RCLCPP_INFO(this->get_logger(), "Twist: %f, %f", twist.linear.x, twist.angular.z);
                 fill_feedback(feedback);
                 RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f", 
@@ -151,11 +146,17 @@ class Navigator : public rclcpp::Node {
             }
         }
 
-        void fill_feedback(TheAction::Feedback::SharedPtr feedback){
+        void fill_feedback(TheAction::Feedback::SharedPtr feedback, double linear=0.0, double angular=0.0){
+            geometry_msgs::msg::Twist twist;
+            twist.linear.x = linear;
+            twist.angular.z = angular;
+            feedback->twist = twist;
         }
 
-        void fill_result(TheAction::Result::SharedPtr result, bool success=true){
-            result->success.data = success;
+        void fill_result(TheAction::Result::SharedPtr result, int return_code=0){
+            std_msgs::msg::Int8 return_code_msg;
+            return_code_msg.data = return_code;
+            result->return_code = return_code_msg;
         }
 
         std::array<double, 3> get_nav_params(double angle_max = 1.0,  double velocity_max = 1.0,  double velocity_scale = 0.2, bool zeroturn = true) {
