@@ -13,7 +13,7 @@
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "std_msgs/msg/empty.hpp"
 #include "std_srvs/srv/trigger.hpp"
- 
+
 #include <iostream>
 #include <thread>
 #include <mutex>
@@ -115,8 +115,18 @@ class Navigator : public rclcpp::Node {
             auto feedback = std::make_shared<TheAction::Feedback>();
             auto result = std::make_shared<TheAction::Result>();
 
+            // Ensure the pose is initialized
+            if (std::isnan(current_pose_.position.x)) {
+                RCLCPP_ERROR(this->get_logger(), "Current pose is not initialized. Aborting goal.");
+                goal_handle->abort(std::make_shared<TheAction::Result>());
+                return;
+            }
+
+            target_pose_ = goal->segment.destination.pose.position;
+
             RCLCPP_INFO(this->get_logger(), "Going to: %f, %f, currently at: %f, %f", target_pose_.x, target_pose_.y, current_pose_.position.x, current_pose_.position.y);
             rclcpp::Rate loop_rate(10);
+            const double goal_threshold = 0.2;
             while (rclcpp::ok()){
                 if (goal_handle->is_canceling()) {
                     fill_result(result, 1);
@@ -127,9 +137,13 @@ class Navigator : public rclcpp::Node {
                     return;
                 }
                 std::array<double, 3> nav_params = get_nav_params(max_angular_speed, max_linear_speed);
-                fill_feedback(feedback, nav_params[0], nav_params[1]);
-                // RCLCPP_INFO(this->get_logger(), "Twist: %f, %f", twist.linear.x, twist.angular.z);
-                fill_feedback(feedback);
+                fill_feedback(feedback, nav_params[0], nav_params[1], nav_params[2]);
+
+                // Check if within the goal threshold
+                if (nav_params[2] < goal_threshold) {
+                    break;
+                }
+                
                 RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f", 
                     current_pose_.position.x, current_pose_.position.y, 
                     target_pose_.x, target_pose_.y, 
@@ -146,11 +160,12 @@ class Navigator : public rclcpp::Node {
             }
         }
 
-        void fill_feedback(TheAction::Feedback::SharedPtr feedback, double linear=0.0, double angular=0.0){
+        void fill_feedback(TheAction::Feedback::SharedPtr feedback, double linear=0.0, double angular=0.0, double distance=0.0){
             geometry_msgs::msg::Twist twist;
             twist.linear.x = linear;
             twist.angular.z = angular;
             feedback->twist = twist;
+            feedback->distance.data = distance;
         }
 
         void fill_result(TheAction::Result::SharedPtr result, int return_code=0){
@@ -159,7 +174,7 @@ class Navigator : public rclcpp::Node {
             result->return_code = return_code_msg;
         }
 
-        std::array<double, 3> get_nav_params(double angle_max = 1.0,  double velocity_max = 1.0,  double velocity_scale = 0.2, bool zeroturn = true) {
+        std::array<double, 3> get_nav_params(double angle_max = 3.14,  double velocity_max = 1.0,  double velocity_scale = 0.2, bool zeroturn = true) {
             // Calculate the difference in positions
             double dx = target_pose_.x - current_pose_.position.x;
             double dy = target_pose_.y - current_pose_.position.y;
@@ -195,7 +210,7 @@ class Navigator : public rclcpp::Node {
                 }
             }
             // Clamp the angular velocity and linear velocity
-            double angular = std::clamp(heading, -angle_max, angle_max);
+            double angular = heading;
             velocity = std::clamp(velocity, -velocity_max, velocity_max);
             return {velocity, angular, distance};
         }
