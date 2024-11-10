@@ -35,7 +35,6 @@ class Navigator : public rclcpp::Node {
         float max_linear_speed;
         float max_angular_speed;
         std::string name;
-        std::string topic_prefix_param;
 
         farmbot_interfaces::msg::Segment segment;
         geometry_msgs::msg::Pose current_pose_;
@@ -47,7 +46,7 @@ class Navigator : public rclcpp::Node {
         rclcpp_action::Server<TheAction>::SharedPtr action_server_;
 
         double previous_heading_error_;
-        
+
     public:
         Navigator(): Node("controller",
             rclcpp::NodeOptions()
@@ -55,24 +54,23 @@ class Navigator : public rclcpp::Node {
             .automatically_declare_parameters_from_overrides(true)
         ) {
             name = this->get_parameter_or<std::string>("name", "path_server");
-            topic_prefix_param = this->get_parameter_or<std::string>("topic_prefix", "/fb");
             max_linear_speed = this->get_parameter_or<float>("max_linear_speed", 0.5);
             max_angular_speed = this->get_parameter_or<float>("max_angular_speed", 0.5);
 
-            this->action_server_ = rclcpp_action::create_server<TheAction>(this, topic_prefix_param + "/con/zeroturn",
+            this->action_server_ = rclcpp_action::create_server<TheAction>(this, "con/zeroturn",
                 std::bind(&Navigator::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
                 std::bind(&Navigator::handle_cancel, this, std::placeholders::_1),
                 std::bind(&Navigator::handle_accepted, this, std::placeholders::_1)
             );
 
             previous_heading_error_ = 0.0;
-            
+
             //subscribers
-            odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(topic_prefix_param +"/loc/odom", 10, [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+            odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("loc/odom", 10, [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
                 current_pose_ = msg->pose.pose;
             });
         }
-    
+
     private:
         rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const TheAction::Goal> goal){
             goal->segment;
@@ -132,10 +130,10 @@ class Navigator : public rclcpp::Node {
                     if (std::hypot(current_pose_.position.x - target_pose_.x, current_pose_.position.y - target_pose_.y) < goal_threshold) {
                         break;
                     }
-                    
-                    RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f", 
-                        current_pose_.position.x, current_pose_.position.y, 
-                        target_pose_.x, target_pose_.y, 
+
+                    RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f",
+                        current_pose_.position.x, current_pose_.position.y,
+                        target_pose_.x, target_pose_.y,
                         nav_params[2]
                     );
                     goal_handle->publish_feedback(feedback);
@@ -206,7 +204,7 @@ class Navigator : public rclcpp::Node {
             }
             // Clamp the angular velocity and linear velocity
             angular_velocity = std::clamp(angular_velocity, -angle_max, angle_max);
-            velocity = std::clamp(velocity, -velocity_max, velocity_max);  // Final clamping 
+            velocity = std::clamp(velocity, -velocity_max, velocity_max);  // Final clamping
             return {velocity, angular_velocity, distance};
         }
 

@@ -14,16 +14,14 @@ def launch_setup(context, *args, **kwargs):
     param_file = os.path.join(get_package_share_directory('farmbot_controller'), 'config', 'params.yaml')
 
     nodes_array = []
-    
+
     zeroturn = Node(
         package='farmbot_controller',
         namespace=namespace,
         executable='zeroturn',
         name='zeroturn',
         parameters=[
-            {"frame_prefix": namespace+"/"},
-            {"namespace": namespace},
-            yaml.safe_load(open(param_file))['zeroturn']['ros__parameters'], 
+            yaml.safe_load(open(param_file))['zeroturn']['ros__parameters'],
             yaml.safe_load(open(param_file))['global']['ros__parameters']
         ]
     )
@@ -32,12 +30,10 @@ def launch_setup(context, *args, **kwargs):
     return nodes_array
 
 
-def generate_launch_description(): 
-    namespace_arg = DeclareLaunchArgument('namespace', default_value='fb')
-    antena_arg = DeclareLaunchArgument('double_antenna', default_value='True')
-    
+def generate_launch_description():
+    namespace_arg = DeclareLaunchArgument('namespace', default_value='fbot')
+
     return LaunchDescription([
         namespace_arg,
-        antena_arg, 
         OpaqueFunction(function = launch_setup)
     ])

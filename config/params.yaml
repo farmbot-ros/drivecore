@@ -1,7 +1,7 @@
 global:
-  ros__parameters:
-    topic_prefix: '/fb'
+    ros__parameters:
+        value: "global"
 
 zeroturn:
-  ros__parameters:
-    name: 'zeroturn'
+    ros__parameters:
+        name: "zeroturn"
