@@ -14,11 +14,15 @@
 #include "std_msgs/msg/empty.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
+#include "diagnostic_updater/diagnostic_updater.hpp"
+#include "diagnostic_msgs/msg/diagnostic_status.hpp"
+
 #include <iostream>
 #include <thread>
 #include <mutex>
 #include <string>
 
+using namespace std::chrono_literals;
 
 float deg2rad(float deg) {
     return deg * M_PI / 180;
@@ -35,6 +39,9 @@ class Navigator : public rclcpp::Node {
         float max_linear_speed;
         float max_angular_speed;
         std::string name;
+        double preheading;
+        double orientation;
+
 
         farmbot_interfaces::msg::Segment segment;
         geometry_msgs::msg::Pose current_pose_;
@@ -47,12 +54,19 @@ class Navigator : public rclcpp::Node {
 
         double previous_heading_error_;
 
+        //diagnostic
+        diagnostic_updater::Updater updater_;
+        diagnostic_msgs::msg::DiagnosticStatus status;
+        rclcpp::TimerBase::SharedPtr diagnostic_timer_;
+
     public:
         Navigator(): Node("controller",
             rclcpp::NodeOptions()
             .allow_undeclared_parameters(true)
             .automatically_declare_parameters_from_overrides(true)
-        ) {
+        ), updater_(this) {
+            status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+            status.message = "Not initialized";
             name = this->get_parameter_or<std::string>("name", "path_server");
             max_linear_speed = this->get_parameter_or<float>("max_linear_speed", 0.5);
             max_angular_speed = this->get_parameter_or<float>("max_angular_speed", 0.5);
@@ -69,9 +83,26 @@ class Navigator : public rclcpp::Node {
             odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("loc/odom", 10, [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
                 current_pose_ = msg->pose.pose;
             });
+
+            // Diagnostic Updater
+            updater_.setHardwareID(static_cast<std::string>(this->get_namespace()) + "/con");
+            updater_.add("Controller Status", this, &Navigator::check_system);
+            diagnostic_timer_ = this->create_wall_timer(1s, std::bind(&Navigator::diagnostic_callback, this));
         }
 
     private:
+        void diagnostic_callback() {
+            updater_.force_update();
+        }
+
+        void check_system(diagnostic_updater::DiagnosticStatusWrapper &stat) {
+            stat.summary(status.level, status.message);
+            stat.add("Current Pose", "x: " + std::to_string(current_pose_.position.x) + " y: " + std::to_string(current_pose_.position.y));
+            stat.add("Target Pose", "x: " + std::to_string(target_pose_.x) + " y: " + std::to_string(target_pose_.y));
+            stat.add("Current Heading", std::to_string(rad2deg(orientation)));
+            stat.add("Target Heading", std::to_string(rad2deg(preheading)));
+        }
+
         rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const TheAction::Goal> goal){
             goal->segment;
             RCLCPP_INFO(this->get_logger(), "Received goal request");
@@ -111,10 +142,12 @@ class Navigator : public rclcpp::Node {
             std::vector<geometry_msgs::msg::Point> segments = generateSegments(current_pose_.position, goal->segment.destination.pose.position);
             for (const geometry_msgs::msg::Point& element : segments) {
                 target_pose_ = element;
-                RCLCPP_INFO(this->get_logger(), "Going to: %f, %f, currently at: %f, %f", target_pose_.x, target_pose_.y, current_pose_.position.x, current_pose_.position.y);
+                // RCLCPP_INFO(this->get_logger(), "Going to: %f, %f, currently at: %f, %f", target_pose_.x, target_pose_.y, current_pose_.position.x, current_pose_.position.y);
                 rclcpp::Rate loop_rate(10);
                 const double goal_threshold = 0.2;
                 while (rclcpp::ok()){
+                    status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
+                    status.message = "Moving to goal";
                     if (goal_handle->is_canceling()) {
                         fill_result(result, 1);
                         goal_handle->canceled(result);
@@ -131,11 +164,11 @@ class Navigator : public rclcpp::Node {
                         break;
                     }
 
-                    RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f",
-                        current_pose_.position.x, current_pose_.position.y,
-                        target_pose_.x, target_pose_.y,
-                        nav_params[2]
-                    );
+                    // RCLCPP_INFO(this->get_logger(), "Pose: (%f, %f), Target: (%f, %f), Distance: %f",
+                    //     current_pose_.position.x, current_pose_.position.y,
+                    //     target_pose_.x, target_pose_.y,
+                    //     nav_params[2]
+                    // );
                     goal_handle->publish_feedback(feedback);
                     loop_rate.sleep();
                 }
@@ -175,7 +208,7 @@ class Navigator : public rclcpp::Node {
             // Calculate the desired velocity (for forward motion)
             double velocity = velocity_scale * distance;
             // Calculate the desired heading
-            double preheading = std::atan2(dy, dx);
+            preheading = std::atan2(dy, dx);
             // Convert current orientation from quaternion to yaw
             double qx = current_pose_.orientation.x;
             double qy = current_pose_.orientation.y;
@@ -184,9 +217,9 @@ class Navigator : public rclcpp::Node {
             // Convert quaternion to Euler angles
             double siny_cosp = 2 * (qw * qz + qx * qy);
             double cosy_cosp = 1 - 2 * (qy * qy + qz * qz);
-            double orientation = std::atan2(siny_cosp, cosy_cosp);
+            orientation = std::atan2(siny_cosp, cosy_cosp);
             // Log the desired and current headings
-            RCLCPP_INFO(this->get_logger(), "Desired Heading: %f, Current Heading: %f", rad2deg(preheading), rad2deg(orientation));
+            // RCLCPP_INFO(this->get_logger(), "Desired Heading: %f, Current Heading: %f", rad2deg(preheading), rad2deg(orientation));
             // Calculate the heading difference and normalize it
             double heading_error = std::atan2(std::sin(preheading - orientation), std::cos(preheading - orientation));
             // Calculate the derivative (rate of change) of heading error
