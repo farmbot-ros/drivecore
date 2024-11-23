@@ -69,7 +69,7 @@ class Navigator : public rclcpp::Node {
             status.message = "Not initialized";
             name = this->get_parameter_or<std::string>("name", "path_server");
             max_linear_speed = this->get_parameter_or<float>("max_linear_speed", 0.5);
-            max_angular_speed = this->get_parameter_or<float>("max_angular_speed", 0.5);
+            max_angular_speed = this->get_parameter_or<float>("max_angular_speed", 0.1);
 
             this->action_server_ = rclcpp_action::create_server<TheAction>(this, "con/zeroturn",
                 std::bind(&Navigator::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
@@ -195,7 +195,7 @@ class Navigator : public rclcpp::Node {
             result->return_code = return_code_msg;
         }
 
-        std::array<double, 3> get_nav_params(double angle_max = 3.14, double velocity_max = 1.0, double velocity_scale = 0.2, bool zeroturn = true, double heading_gain = 1.5, double derivative_gain = 0.1) {
+        std::array<double, 3> get_nav_params(double angle_max = 3.14/4, double velocity_max = 1.0, double velocity_scale = 0.2, bool zeroturn = true, double heading_gain = 1.5, double derivative_gain = 0.1) {
             // Calculate the difference in positions
             double dx = target_pose_.x - current_pose_.position.x;
             double dy = target_pose_.y - current_pose_.position.y;
@@ -229,7 +229,7 @@ class Navigator : public rclcpp::Node {
             double angular_velocity = (heading_gain * heading_error) + (derivative_gain * heading_derivative);
             // Handle "zeroturn" behavior
             if (zeroturn) {
-                const double turn_threshold = 0.02;  // Reduced threshold for more aggressive turning
+                const double turn_threshold = 0.1;  // Reduced threshold for more aggressive turning
                 if (std::abs(heading_error) > turn_threshold) {
                     // If the heading difference is significant, turn in place and avoid moving forward
                     return {0.0, std::clamp(angular_velocity, -angle_max, angle_max), distance};
