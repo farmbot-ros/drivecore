@@ -27,7 +27,10 @@
 #include <algorithm>
 #include <limits>
 
+#include <spdlog/spdlog.h>
+
 using namespace std::chrono_literals;
+namespace echo = spdlog;
 
 double clamp(double v, double lo, double hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
@@ -273,6 +276,7 @@ class ModelPredictiveController {
                     }
 
                     std::array<double, 3> nav_params = run_mpc_control();
+                    // RCLCPP_INFO(this->get_logger(), "Linear: %f, Angular: %f, Distance: %f", nav_params[0], nav_params[1], nav_params[2]);
                     fill_feedback(feedback, nav_params[0], nav_params[1], nav_params[2]);
 
                     if (std::hypot(current_pose_.position.x - target_pose_.x, current_pose_.position.y - target_pose_.y) < goal_threshold) {
@@ -315,6 +319,7 @@ class ModelPredictiveController {
 
             // Calculate desired heading
             preheading = std::atan2(dy, dx);
+            echo::info("Preheading: {}", preheading);
 
             // Convert quaternion to yaw
             double qx = current_pose_.orientation.x;
@@ -324,6 +329,7 @@ class ModelPredictiveController {
             double siny_cosp = 2 * (qw * qz + qx * qy);
             double cosy_cosp = 1 - 2 * (qy * qy + qz * qz);
             orientation = std::atan2(siny_cosp, cosy_cosp);
+            echo::info("Orientation: {}", orientation);
 
             // Current state
             State current_state;
@@ -357,7 +363,7 @@ class ModelPredictiveController {
             // The angular velocity approximately relates to steering angle:
             // angular velocity ~ (v / wheelbase) * tan(steer), assume wheelbase ~ 2.0
             // We can just convert steer to a rough angular rate command for demonstration.
-            double wheelbase = 2.0;
+            double wheelbase = 0.1;
             double angular_velocity = (commanded_v / wheelbase) * std::tan(steer);
             angular_velocity = clamp(angular_velocity, -max_angular_speed, max_angular_speed);
 

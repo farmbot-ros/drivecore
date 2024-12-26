@@ -11,12 +11,12 @@ from launch.actions import OpaqueFunction
 
 def launch_setup(context, *args, **kwargs):
     namespace = LaunchConfiguration('namespace').perform(context)
-    param_file = os.path.join(get_package_share_directory('farmbot_controller'), 'config', 'params.yaml')
+    param_file = os.path.join(get_package_share_directory('farmbot_drivecore'), 'config', 'params.yaml')
 
     nodes_array = []
 
     zeroturn = Node(
-        package='farmbot_controller',
+        package='farmbot_drivecore',
         namespace=namespace,
         executable='zeroturn',
         name='zeroturn',
@@ -28,7 +28,7 @@ def launch_setup(context, *args, **kwargs):
     nodes_array.append(zeroturn)
 
     predictmod = Node(
-        package='farmbot_controller',
+        package='farmbot_drivecore',
         namespace=namespace,
         executable='predictmod',
         name='predictmod',
