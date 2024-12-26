@@ -27,17 +27,17 @@ def launch_setup(context, *args, **kwargs):
     )
     nodes_array.append(zeroturn)
 
-    predictmod = Node(
-        package='farmbot_drivecore',
-        namespace=namespace,
-        executable='predictmod',
-        name='predictmod',
-        parameters=[
-            yaml.safe_load(open(param_file))['predictmod']['ros__parameters'],
-            yaml.safe_load(open(param_file))['global']['ros__parameters']
-        ]
-    )
-    nodes_array.append(predictmod)
+    # predictmod = Node(
+    #     package='farmbot_drivecore',
+    #     namespace=namespace,
+    #     executable='predictmod',
+    #     name='predictmod',
+    #     parameters=[
+    #         yaml.safe_load(open(param_file))['predictmod']['ros__parameters'],
+    #         yaml.safe_load(open(param_file))['global']['ros__parameters']
+    #     ]
+    # )
+    # nodes_array.append(predictmod)
 
     return nodes_array
 
